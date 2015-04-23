@@ -1,0 +1,16 @@
+#!/usr/bin/env python
+import argparse
+
+import ikwi
+
+parser = argparse.ArgumentParser(description="A personal wiki.")
+parser.add_argument('-b', '--base', help='The git repository to serve.')
+parser.add_argument('command')
+
+args = parser.parse_args()
+
+site = ikwi.Ikwi(args.base or '.')
+command = args.command.lower()
+
+if command == 'run':
+    site.run()
