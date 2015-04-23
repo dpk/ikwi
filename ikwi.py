@@ -9,7 +9,6 @@ import pypandoc
 from werkzeug.wrappers import Request, Response
 from werkzeug.serving import run_simple
 
-from IPython import embed
 from util import filename_to_title, title_to_filename, sanitize_html
 
 
