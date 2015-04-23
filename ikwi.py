@@ -85,6 +85,11 @@ class Ikwi:
         file_path = self.safe_file_path('pages', title_to_filename(filename))
         with open(file_path, 'r', encoding='utf-8') as file:
             return file.read()
+    def get_header_image(self, filename):
+        filename = title_to_filename(filename)
+        for extension in Ikwi.image_extensions:
+            if os.path.isfile(self.safe_file_path('images', filename + extension)):
+                return '/images/' + title_to_filename(filename) + extension
 
     def to_html(self, source):
         return pypandoc.convert(source, 'html', format=self.config['page_format'])
@@ -95,7 +100,9 @@ class Ikwi:
         page_title = filename_to_title(filename)
         page_source = self.get_page(filename)
         page_content = self.to_html(page_source)
-        return self.render_template('page.html', page_title=page_title, page_content=page_content)
+        header_image = self.get_header_image(filename)
+        
+        return self.render_template('page.html', page_title=page_title, page_content=page_content, header_image=header_image)
     
     def edit_page(self, filename):
         page_title = filename_to_title(filename)
@@ -105,7 +112,9 @@ class Ikwi:
             page_source = ''
         
         page_content = self.to_html(page_source)
-        return self.render_template('edit.html', page_title=page_title, page_content=page_content)
+        header_image = self.get_header_image(filename)
+        
+        return self.render_template('edit.html', page_title=page_title, page_content=page_content, header_image=header_image)
     
     def save_page(self, filename, request):
         old_title = request.form['oldtitle'].strip()
