@@ -1,6 +1,7 @@
 """
 www -- minimal web framework, a customized version of Werkzeug
 """
+import json
 
 from werkzeug.wrappers import Request as BaseRequest, Response
 from werkzeug.serving import run_simple
@@ -25,6 +26,13 @@ class Request(BaseRequest):
             self.query_verb = None
 
 # class Response(BaseResponse): pass
+
+def JSONResponse(obj, code=200, headers={}):
+    return Response(
+        json.dumps(obj),
+        code,
+        headers.update('Content-Type': 'application/json')
+    )
 
 class MethodNotAllowed(Exception): pass
 class Application:
