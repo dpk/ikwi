@@ -109,49 +109,22 @@ class Cursor:
     
     def add(self, path, contents):
         blob_id = self.repo.create_blob(contents)
-        *subtree_names, blob_name = path.split('/')
+        idx = pygit2.Index()
+        idx.read_tree(self.root_tree)
         
-        subtrees = deque()
-        tree = self.root_tree
-        for subtree_name in subtree_names:
-            if subtree_name not in tree:
-                break
-            
-            subtree = self.repo[tree[subtree_name].id]
-            if subtree.type != pygit2.GIT_OBJ_TREE:
-                raise InvalidOperationError("refusing to replace another kind of object with a tree (%r in %r)" % (subtree_name, path))
-            
-            subtrees.append(subtree)
-            tree = subtree
+        invalid = False
+        try:
+            idx.add(pygit2.IndexEntry(path, blob_id, pygit2.GIT_FILEMODE_BLOB))
+        except pygit2.GitError as err:
+            if 'appears as both a file and a directory' in err.args[0]:
+                invalid = True
         
-        insert_obj_name, insert_obj, insert_obj_type = blob_name, blob_id, pygit2.GIT_FILEMODE_BLOB
-        if len(subtrees) != len(subtree_names):
-            top_tree = self.repo.TreeBuilder()
-            top_tree.insert(blob_name, blob_id, pygit2.GIT_FILEMODE_BLOB)
-            top_tree_id = top_tree.write()
+        if invalid:
+            raise InvalidOperationError('refusing to replace another kind of object with a tree')
 
-            rev_tree_id = top_tree_id
-            for subtree_name in reversed(subtree_names[len(subtrees)+1:]):
-                subrev_tree = self.repo.TreeBuilder()
-                subrev_tree.insert(subtree_name, rev_tree_id, pygit2.GIT_FILEMODE_TREE)
-                rev_tree_id = subrev_tree.write()
-            
-            insert_obj_name, insert_obj, insert_obj_type = subtree_names[len(subtrees)], rev_tree_id, pygit2.GIT_FILEMODE_TREE
-        
-        for subtree, subtree_name in zip(reversed(subtrees), reversed(subtree_names[:len(subtrees)])):
-            new_tree_builder = self.repo.TreeBuilder(subtree)
-            new_tree_builder.insert(insert_obj_name, insert_obj, insert_obj_type)
-            new_tree = new_tree_builder.write()
-            
-            insert_obj_name = subtree_name
-            insert_obj = new_tree
-            insert_obj_type = pygit2.GIT_FILEMODE_TREE
-        
-        new_root_tree_builder = self.repo.TreeBuilder(self.root_tree)
-        new_root_tree_builder.insert(insert_obj_name, insert_obj, insert_obj_type)
-        new_root_tree = new_root_tree_builder.write()
-        self.root_tree = self.repo[new_root_tree]
-    
+        tree_id = idx.write_tree(self.repo)
+        self.root_tree = self.repo[tree_id]
+
     def delete(self, path):
         *subtree_names, blob_name = path.split('/')
         tree = self.root_tree
