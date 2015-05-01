@@ -10,9 +10,7 @@ import pypandoc
 
 from storage import Storage, Signature
 from util import url_to_title, url_to_filename, title_to_filename, sanitize_html, StorageTemplateLoader
-from www import Application, Request, Response
-
-from IPython import embed
+from www import Application, Request, Response, JSONResponse
 
 class Ikwi(Application):
     image_extensions = ['.jpg', '.png', '.svg', '.gif']
@@ -177,15 +175,17 @@ class Ikwi(Application):
                 
                 cursor.add('images/' + image_filename, header_image)
             
-            embed()
-
-        cursor.save('updated page: %s' % title, Signature(self.config['editors'][request.authorization.username]['name'], self.config['editors'][request.authorization.username]['email']))
+        cursor.save('%s: %s' % (title, request.form.get('change_message', '')), Signature(self.config['editors'][request.authorization.username]['name'], self.config['editors'][request.authorization.username]['email']))
         status = cursor.update('HEAD')
         
         if status.conflict:
-            return Response(409)
+            return JSONResponse({
+                'status': 'conflict',
+                'source': status.source_revision,
+                'target': status.target_revision,
+            }, 409)
         
-        return Response(200)
+        return JSONResponse({'status': 'ok', 'revision': status.revision})
 
     def serve_file(self, path, request):
         path = path[0]
