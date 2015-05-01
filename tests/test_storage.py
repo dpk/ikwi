@@ -103,6 +103,23 @@ def test_dont_replace_blobs_with_trees(repo):
 
     assert('refusing to replace another kind of object with a tree' in str(excinfo.value))
 
+def test_delete_blob(repo):
+    store = Storage(repo.path)
+    cursor = store.cursor(repo.head.target)
+
+    delete_result = cursor.delete('test1.txt')
+    
+    assert(delete_result == True)
+    assert('test1.txt' not in cursor.root_tree)
+
+def test_delete_nonexistent_blob(repo):
+    store = Storage(repo.path)
+    cursor = store.cursor(repo.head.target)
+
+    delete_result = cursor.delete('nonexistent.txt')
+    
+    assert(delete_result == False)
+
 def test_save_cursor(repo):
     store = Storage(repo.path)
     cursor = store.cursor(repo.head.target)

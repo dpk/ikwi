@@ -126,18 +126,17 @@ class Cursor:
         self.root_tree = self.repo[tree_id]
 
     def delete(self, path):
-        *subtree_names, blob_name = path.split('/')
-        tree = self.root_tree
+        idx = pygit2.Index()
+        idx.read_tree(self.root_tree)
         
-        for subtree_name in subtree_names:
-            tree = self.repo[tree[subtree_name].id]
+        try:
+            idx.remove(path)
+        except OSError:
+            return False
         
-        if blob_name not in tree: return False
-        tree_builder = self.repo.TreeBuilder(tree)
-        tree_builder.remove(blob_name)
-        subtree_id = tree_builder.write()
-        
-        # todo
+        tree_id = idx.write_tree(self.repo)
+        self.root_tree = self.repo[tree_id]
+        return True
     
     def save(self, message, author, committer=None):
         if committer == None: committer = author
