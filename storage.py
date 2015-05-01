@@ -32,6 +32,10 @@ class Storage:
     def cursor(self, base_commit):
         return Cursor(self, commit_id(base_commit))
     
+    def latest(self):
+        head_commit = self.repo[self.repo.head.resolve().target]
+        return StorageRevision(self, head_commit.id, head_commit.tree)
+    
     def merge_conflict(self, source_revision, target_revision):
         merge = self.repo.merge_commits(target_revision, source_revision)
         if not merge.conflicts:
@@ -53,6 +57,41 @@ class Storage:
                     time.sleep(spin_wait)
         
         return lock
+
+class StorageRevision:
+    def __init__(self, storage, revision, tree, root_tree=None):
+        self.storage = storage
+        self.revision = commit_id(revision)
+        self.tree = tree
+        if not root_tree:
+            self.root_tree = tree
+        else:
+            self.root_tree = root_tree
+    
+    def __contains__(self, filename):
+        return (filename in self.tree) and (self.tree[filename].filemode == pygit2.GIT_FILEMODE_BLOB)
+    
+    def get_id(self, filename):
+        tree_entry = self.tree[filename]
+        return str(tree_entry.id)
+    
+    def get(self, filename):
+        if filename not in self.tree: return None
+        tree_entry = self.tree[filename]
+        if tree_entry.filemode != pygit2.GIT_FILEMODE_BLOB: return None
+        blob = self.storage.repo[tree_entry.id]
+        return blob.data
+    
+    def dir(self, dirname):
+        if dirname not in self.tree: return EmptyStorageRevision()
+        tree_entry = self.tree[dirname]
+        if tree_entry.filemode != pygit2.GIT_FILEMODE_TREE: return EmptyStorageRevision()
+        tree = self.storage.repo[tree_entry.id]
+        return StorageRevision(self.storage, self.revision, tree, self.root_tree)
+
+# this needs a better API
+class EmptyStorageRevision:
+    def get(self, filename): return None
 
 class InvalidOperationError(Exception): pass
 class Cursor:
@@ -112,6 +151,20 @@ class Cursor:
         new_root_tree_builder.insert(insert_obj_name, insert_obj, insert_obj_type)
         new_root_tree = new_root_tree_builder.write()
         self.root_tree = self.repo[new_root_tree]
+    
+    def delete(self, path):
+        *subtree_names, blob_name = path.split('/')
+        tree = self.root_tree
+        
+        for subtree_name in subtree_names:
+            tree = self.repo[tree[subtree_name].id]
+        
+        if blob_name not in tree: return False
+        tree_builder = self.repo.TreeBuilder(tree)
+        tree_builder.remove(blob_name)
+        subtree_id = tree_builder.write()
+        
+        # todo
     
     def save(self, message, author, committer=None):
         if committer == None: committer = author

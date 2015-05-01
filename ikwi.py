@@ -1,50 +1,51 @@
 import mimetypes
 import os
 import os.path
+from urllib.parse import urlparse, urljoin
 import yaml
 
 import bcrypt
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment
 import pypandoc
-from werkzeug.wrappers import Request, Response
-from werkzeug.serving import run_simple
 
-from util import filename_to_title, title_to_filename, sanitize_html
+from storage import Storage, Signature
+from util import url_to_title, url_to_filename, title_to_filename, sanitize_html, StorageTemplateLoader
+from www import Application, Request, Response
 
+from IPython import embed
 
-class Ikwi:
+class Ikwi(Application):
     image_extensions = ['.jpg', '.png', '.svg', '.gif']
+    version = '0.2'
     
-    def __init__(self, site_base):
-        self.site_base = os.path.realpath(site_base)
+    def __init__(self, repo_path):
+        self.storage = Storage(repo_path)
         
-        # gitify
-        with open(os.path.join(self.site_base, 'site.yaml'), 'r', encoding='utf-8') as config_file:
-            self.config = yaml.load(config_file)
-        
+        self.base_url = ''
+        self.base_path = ''
+        self.config = {}
+        self.config_revision = None
         self.jinja_env = Environment(
-            # gitify
-            loader=FileSystemLoader(os.path.join(site_base, 'templates')),
+            loader=StorageTemplateLoader(self.storage),
             autoescape=True
         )
+        self.jinja_env.globals = {
+            'site_url': self.site_url
+        }
 
-    def wsgi_app(self, environ, start_response):
-        request = Request(environ)
-        try:
-            response = self.dispatch_request(request)
-        except FileNotFoundError:
-            response = self.not_found()
-        except PermissionError:
-            response = self.unauthorized()
-        
-        return response(environ, start_response)
+    def before_request(self, request):
+        self.latest = self.storage.latest()
+        if self.latest.revision != self.config_revision:
+            self.config = yaml.load(self.latest.get('site.yaml').decode('utf-8'))
+            if 'base_url' in self.config:
+                self.base_url = self.config['base_url']
+                self.base_path = urlparse(self.base_url).path.rstrip('/')
+            else:
+                self.base_url = '/'
+        request.path = request.path[len(self.base_path):]
 
-    def __call__(self, environ, start_response):
-        return self.wsgi_app(environ, start_response)
-
-    def run(self):
-        run_simple('127.0.0.1', 3000, self, use_debugger=True, use_reloader=True)
-
+    def site_url(self, path=''):
+        return urljoin(self.base_url, path)
 
     def render_template(self, template_name, **context):
         t = self.jinja_env.get_template(template_name)
@@ -54,102 +55,166 @@ class Ikwi:
         return Response(t.render(vars), mimetype='text/html')
 
     def dispatch_request(self, request):
-        if request.path.startswith('/files/'):
-            return self.file_from_directory('files', request.path[7:])
-        elif request.path.startswith('/images/'):
-            return self.file_from_directory('images', request.path[8:])
-        elif request.path == '/site/edit.js':
-            js_dir = os.path.join(os.path.dirname(__file__), 'js')
-            js_files = ['squire.js', 'jquery.js', 'underscore.js', 'editor.js']
-            def js_gen():
-                for js_filename in js_files:
-                    with open(os.path.join(js_dir, js_filename), 'rb') as file:
-                        yield from file
-                        yield b'\n'
+        base, *path = request.path.strip('/').split('/')
+        
+        if base == 'files':
+            self.require_method(request, ['GET'])
+            return self.serve_file(path, request)
+        elif base == 'images':
+            self.require_method(request, ['GET'])
+            if len(path) == 0: return self.not_found()
             
-            return Response(js_gen(), mimetype='application/javascript')
+            if request.query_verb == 'old' and 'rev' in request.args:
+                old = self.storage.at_revision(request.args['rev'])
+                return self.serve_image(path[0], old, request)
+            else:
+                return self.serve_image(path[0], self.latest, request)
+        elif base == 'site':
+            self.require_method(request, ['GET'])
+            if path == ['edit.js']:
+                js_dir = os.path.join(os.path.dirname(__file__), 'js')
+                js_files = ['squire.js', 'jquery.js', 'underscore.js', 'editor.js']
+                def js_gen():
+                    for js_filename in js_files:
+                        with open(os.path.join(js_dir, js_filename), 'rb') as file:
+                            yield from file
+                            yield b'\n'
+            
+                response = Response(js_gen(), mimetype='application/javascript')
+                response.set_etag(Ikwi.version)
+                response.make_conditional(request)
+                return response
+            else:
+                return self.not_found()
         else:
-            filename = (request.path[1:] or 'Homepage')
+            self.require_method(request, ['GET', 'POST'])
+            if len(path) > 0: return self.not_found()
+            
+            url_page_name = (base or 'Homepage')
             if request.method == 'GET':
-                if request.query_string == b'edit':
+                if request.query_verb == 'old':
+                    return self.show_page(url_page_name, self.storage.at_revision(request.args['rev']))
+                elif request.query_verb == 'edit':
                     self.must_login(request)
-                    return self.edit_page(filename)
-                elif request.query_string == b'':
-                    return self.show_page(filename)
+                    return self.edit_page(url_page_name)
+                elif request.query_verb in {None, 'no-redirect'}:
+                    return self.show_page(url_page_name, self.latest)
+                else:
+                    return self.not_found()
             elif request.method == 'POST':
                 self.must_login(request)
-                return self.save_page(filename, request)
-
-    # gitify
-    def get_page(self, filename):
-        file_path = self.safe_file_path('pages', title_to_filename(filename))
-        with open(file_path, 'r', encoding='utf-8') as file:
-            return file.read()
-    def get_header_image(self, filename):
-        filename = title_to_filename(filename)
-        for extension in Ikwi.image_extensions:
-            if os.path.isfile(self.safe_file_path('images', filename + extension)):
-                return '/images/' + title_to_filename(filename) + extension
+                return self.save_page(url_page_name, request)
 
     def to_html(self, source):
         return pypandoc.convert(source, 'html', format=self.config['page_format'])
-    def to_source(self, source):
-        return pypandoc.convert(source, self.config['page_format'], format='html')
+    def to_source(self, html):
+        return pypandoc.convert(html, self.config['page_format'], format='html')
 
-    def show_page(self, filename):
-        page_title = filename_to_title(filename)
-        page_source = self.get_page(filename)
-        page_content = self.to_html(page_source)
-        header_image = self.get_header_image(filename)
+    def get_page(self, url_page_name, revision):
+        pages = revision.dir('pages')
+        filename = url_to_filename(url_page_name)
+        if filename in pages:
+            return pages.get(filename)
+        else:
+            return None
+
+    def header_image(self, page_filename, revision):
+        if revision.revision != self.latest.revision:
+            old_string = '?old&rev=%s' % revision.revision
+        else:
+            old_string = ''
         
-        return self.render_template('page.html', page_title=page_title, page_content=page_content, header_image=header_image)
+        images = revision.dir('images')
+        for extension in Ikwi.image_extensions:
+            image_filename = page_filename + extension
+            if image_filename in images:
+                return self.site_url('images/' + image_filename + old_string)
+
+    def show_page(self, url_page_name, revision):
+        page_title = url_to_title(url_page_name)
+        page_source = self.get_page(url_page_name, revision)
+        
+        if not page_source:
+            return self.not_found(creatable=True)
+        
+        page_content = self.to_html(page_source)
+        header_image = self.header_image(url_to_filename(url_page_name), revision)
+        
+        response = self.render_template('page.html', page_title=page_title, page_content=page_content, header_image=header_image)
+        # todo: make response cacheable
+        return response
     
-    def edit_page(self, filename):
-        page_title = filename_to_title(filename)
-        try:
-            page_source = self.get_page(filename)
-        except FileNotFoundError:
-            page_source = ''
+    def edit_page(self, url_page_name):
+        page_title = url_to_title(url_page_name)
+        page_source = self.get_page(url_page_name, self.latest)
         
-        page_content = self.to_html(page_source)
-        header_image = self.get_header_image(filename)
+        if not page_source:
+            page_content = '<p></p>'
+        else:
+            page_content = self.to_html(page_source)
         
-        return self.render_template('edit.html', page_title=page_title, page_content=page_content, header_image=header_image)
+        header_image = self.header_image(url_to_filename(url_page_name), self.latest)
+        
+        return self.render_template('edit.html', page_title=page_title, page_content=page_content, header_image=header_image, revision_id=self.latest.revision)
     
     def save_page(self, filename, request):
-        old_title = request.form['oldtitle'].strip()
-        title = request.form['title'].strip()
-        if old_title != title:
-            try:
-                old_path = self.safe_file_path('pages', old_title)
-            except FileNotFoundError:
-                old_path = None
-            
-            if old_path and os.path.isfile(old_path):
-                with open('old_path', 'w') as file:
-                    print('=> %s' % title_to_filename(title), file=file)
-        
+        title = request.form['title']
         html = sanitize_html(request.form['content'])
         filename = title_to_filename(title)
-        with open(self.safe_file_path('pages', filename), 'w', encoding='utf-8') as file:
-            file.write(self.to_source(html))
+        
+        cursor = self.storage.cursor(request.form['revision'])
+        cursor.add('pages/' + filename, self.to_source(html).encode('utf-8'))
         
         if 'headerimage' in request.files:
             header_image = request.files['headerimage'].read()
             extension = mimetypes.guess_extension(request.files['headerimage'].mimetype)
-            if extension == '.jpe': extension = '.jpg' # wtf Python?!
+            if extension.startswith('.jpe'): extension = '.jpg' # wtf Python?!
+            
             if extension in Ikwi.image_extensions:
                 image_filename = filename + extension
                 for other_extension in Ikwi.image_extensions:
-                    try:
-                        os.unlink(self.safe_file_path('images', filename + other_extension))
-                    except FileNotFoundError: pass
+                    cursor.delete('images/' + filename + other_extension)
                 
-                with open(self.safe_file_path('images', image_filename), 'wb') as file:
-                    file.write(header_image)
-                    file.flush()
+                cursor.add('images/' + image_filename, header_image)
+            
+            embed()
+
+        cursor.save('updated page: %s' % title, Signature(self.config['editors'][request.authorization.username]['name'], self.config['editors'][request.authorization.username]['email']))
+        status = cursor.update('HEAD')
         
-        return self.show_page(title_to_filename(title))
+        if status.conflict:
+            return Response(409)
+        
+        return Response(200)
+
+    def serve_file(self, path, request):
+        path = path[0]
+        dir = self.latest.dir('files')
+        if path not in dir:
+            return self.not_found()
+        
+        type, encoding = mimetypes.guess_type(path)
+        
+        # prevent the blob from being decoded unless actually needed
+        def yield_get(): yield dir.get(path)
+        response = Response(yield_get(), mimetype=type, direct_passthrough=True)
+        response.set_etag(dir.get_id(path))
+        response.make_conditional(request)
+        return response
+
+    def serve_image(self, path, revision, request):
+        path = url_to_filename(path)
+        dir = self.latest.dir('images')
+        if path not in dir:
+            return self.not_found()
+        type, encoding = mimetypes.guess_type(path)
+        
+        # prevent the blob from being decoded unless actually needed
+        def yield_get(): yield dir.get(path)
+        response = Response(yield_get(), mimetype=type, direct_passthrough=True)
+        response.set_etag(dir.get_id(path))
+        response.make_conditional(request)
+        return response
 
     def must_login(self, request):
         if not request.authorization:
@@ -166,35 +231,15 @@ class Ikwi:
     
     def unauthorized(self):
         return Response(
-            "unauthorized!",
+            self.render_template('unauthorized.html'),
             401,
             {
                 'WWW-Authenticate': 'Basic realm="%s"' % self.config['site_title']
             }
         )
     
-    def not_found(self):
+    def not_found(self, creatable=False):
         return Response(
-            "unfound!",
+            self.render_template('not_found.html', creatable=creatable),
             404
         )
-
-    # gitify
-    def safe_file_path(self, directory, file): # 'safe' = famous last words
-        file_path = os.path.join(self.site_base, directory, file)
-        file_path = os.path.realpath(file_path)
-
-        if not file_path.startswith(self.site_base + '/'):
-            raise FileNotFoundError
-        
-        return file_path
-    
-    def file_from_directory(self, directory, file):
-        file_path = self.safe_file_path(directory, file)
-        file_type, file_encoding = mimetypes.guess_type(file_path)
-        try:
-            file = open(file_path, 'rb') # server closes this for us
-        except FileNotFoundError:
-            return self.not_found()
-
-        return Response(file, mimetype=file_type, direct_passthrough=True)

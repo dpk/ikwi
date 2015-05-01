@@ -124,6 +124,7 @@ $(function() {
             var formData = new FormData();
             formData.append('title', $('#titlefield').val());
             formData.append('oldtitle', $('#oldtitle').val());
+            formData.append('revision', $('#revision_id').val());
             formData.append('content', editor.getHTML());
             if (imageUpload) {
                 formData.append('headerimage', imageUpload);
