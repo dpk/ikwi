@@ -8,9 +8,12 @@ import whoosh.fields
 import whoosh.index
 import whoosh.qparser
 
-from IPython import embed
-from database import Database
-from util import url_to_filename, filename_to_title, filename_to_url
+if "." in __name__:
+    from .database import Database
+    from .util import url_to_filename, filename_to_title, filename_to_url
+else:
+    from database import Database
+    from util import url_to_filename, filename_to_title, filename_to_url
 
 
 ns = {'h':'http://www.w3.org/1999/xhtml'}

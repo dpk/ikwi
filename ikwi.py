@@ -9,10 +9,18 @@ import bcrypt
 from jinja2 import Environment
 import pypandoc
 
-from storage import Storage, Signature
-from util import url_to_title, url_to_filename, title_to_filename, sanitize_html, StorageTemplateLoader
-from www import Application, Request, Response, JSONResponse
-from search import LinksDatabase, SearchDatabase
+# Save PEP 3122!
+if "." in __name__:
+    from .storage import Storage, Signature
+    from .util import url_to_title, url_to_filename, title_to_filename, sanitize_html, StorageTemplateLoader
+    from .www import Application, Request, Response, JSONResponse
+    from .search import LinksDatabase, SearchDatabase
+else:
+    from storage import Storage, Signature
+    from util import url_to_title, url_to_filename, title_to_filename, sanitize_html, StorageTemplateLoader
+    from www import Application, Request, Response, JSONResponse
+    from search import LinksDatabase, SearchDatabase
+
 
 class Ikwi(Application):
     image_extensions = ['.jpg', '.png', '.svg', '.gif']

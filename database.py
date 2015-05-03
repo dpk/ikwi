@@ -3,8 +3,6 @@ import os
 import os.path
 import time
 
-from IPython import embed
-
 # common functionality for the search and links databases
 class Database:
     def __init__(self, site):
