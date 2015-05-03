@@ -31,7 +31,7 @@ def JSONResponse(obj, code=200, headers={}):
     return Response(
         json.dumps(obj),
         code,
-        headers.update('Content-Type': 'application/json')
+        headers.update({'Content-Type': 'application/json'})
     )
 
 class MethodNotAllowed(Exception): pass
@@ -55,7 +55,7 @@ class Application:
         return self.wsgi_app(environ, start_response)
 
     def run(self):
-        run_simple('127.0.0.1', 3000, self, use_debugger=True, use_reloader=True)
+        run_simple('127.0.0.1', 3000, self, use_debugger=True)
     
     def require_method(self, request, methods):
         if request.method not in methods:

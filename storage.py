@@ -180,6 +180,7 @@ class Cursor:
 class UpdateResult:
     def __init__(self, commit):
         self.commit = commit
+        self.revision = commit_id(commit.id)
     
     @property
     def merged(self): return len(self.commit.parents) > 1

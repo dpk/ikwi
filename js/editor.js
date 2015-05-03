@@ -5,7 +5,8 @@ $(function() {
         var editFrame = document.getElementById('editframe'),
                 source = editFrame.contentDocument.body.innerHTML,
                 editor = new Squire(editFrame.contentDocument),
-                imageUpload = null;
+                imageUpload = null,
+                oldSelection = null;
         editor.defaultBlockTag = 'P';
         
         editFrame.contentDocument.body.innerHTML = source;
@@ -55,6 +56,7 @@ $(function() {
         $('#boldbutton').click(addTag('strong'));
         $('#italicbutton').click(addTag('em'));
         $('#blockstyle').change(function(e) {
+            e.preventDefault();
             editor.removeList();
             var newTag = $(e.target).val(),
                     newFragment = new DocumentFragment();
@@ -70,20 +72,90 @@ $(function() {
             
             editor.focus();
         });
-        $('#ulbutton').click(function() {
+        $('#ulbutton').click(function(e) {
+            e.preventDefault();
             if (editor.hasFormat('ul')) {
                 editor.removeList();
             } else {
                 editor.makeUnorderedList();
             }
         });
-        $('#olbutton').click(function() {
+        $('#olbutton').click(function(e) {
+            e.preventDefault();
             if (editor.hasFormat('ol')) {
                 editor.removeList();
             } else {
                 editor.makeOrderedList();
             }
         });
+        $('#linkbutton').click(function(e) {
+            e.preventDefault();
+            if (editor.hasFormat('a')) {
+                editor.removeLink();
+            } else {
+                oldSelection = editor.getSelection();
+                showLinkPopup(editor.getSelectedText());
+            }
+        });
+        
+        var showLinkPopup = function(text) {
+            var cover = $('<div class=cover />'),
+                dialog = $('<div class=dialog />'),
+                search = $('<input type=search id=linksearch />'),
+                results = $('<div class=results />');
+            
+            var addResult = function(name, url) {
+                var resultLink = $('<a />'),
+                    resultDiv = $('<div />');
+                resultLink.attr('href', url);
+                resultDiv.text(name);
+                resultLink.click(function(e) {
+                    e.preventDefault();
+                    editor.makeLink(url);
+                    $('.cover').detach();
+                });
+                
+                resultLink.append(resultDiv);
+                results.append(resultLink);
+            }
+            var urlRegexp = /^[a-z][a-z-]*:\S/;
+            var doSearch = function(query) {
+                $.ajax({dataType: 'json', url: 'site/search', data: {q: query}, success: function(data) {
+                    if (search.val() !== query) { return; }
+                    
+                    results.empty();
+                    if (query.match(urlRegexp)) { addResult(query, query); }
+                    var isFirst = true;
+                    _.each(data.results, function (result) {
+                        addResult(result.title, result.url);
+                        if (isFirst && result.title.trim().toLowerCase() !== query.trim().toLowerCase()) {
+                            var newPageTitle = query.trim().charAt(0).toUpperCase() + query.slice(1),
+                                newPageURL = newPageTitle.replace(' ', '_');
+                            addResult('New page: ' + newPageTitle, newPageURL);
+                        } else {
+                            isFirst = false;
+                        }
+                    });
+                }});
+            };
+            
+            doSearch(text);
+            doSearch = _.throttle(doSearch, 500, {leading: false});
+            
+            dialog.html('<h3>Insert Link</h3>');
+            search.val(text);
+            search.on('keyup', function(e) {
+                if (e.keyCode === 27) { $('.cover').detach(); return; }
+                var query = search.val();
+                if (query.match(urlRegexp)) { results.empty(); addResult(query, query); }
+                doSearch(query);
+            });
+            dialog.append(search);
+            dialog.append(results);
+            cover.append(dialog);
+            $(document.body).prepend(cover);
+            search.focus();
+        };
         
         var setHeaderImage = function(file) {
             reader = new FileReader();

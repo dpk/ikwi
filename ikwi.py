@@ -3,6 +3,7 @@ import os
 import os.path
 from urllib.parse import urlparse, urljoin
 import yaml
+import random
 
 import bcrypt
 from jinja2 import Environment
@@ -11,10 +12,11 @@ import pypandoc
 from storage import Storage, Signature
 from util import url_to_title, url_to_filename, title_to_filename, sanitize_html, StorageTemplateLoader
 from www import Application, Request, Response, JSONResponse
+from search import LinksDatabase, SearchDatabase
 
 class Ikwi(Application):
     image_extensions = ['.jpg', '.png', '.svg', '.gif']
-    version = '0.2'
+    version = '0.1'
     
     def __init__(self, repo_path):
         self.storage = Storage(repo_path)
@@ -30,6 +32,9 @@ class Ikwi(Application):
         self.jinja_env.globals = {
             'site_url': self.site_url
         }
+        
+        self.links = LinksDatabase(self)
+        self.search = SearchDatabase(self)
 
     def before_request(self, request):
         self.latest = self.storage.latest()
@@ -44,6 +49,23 @@ class Ikwi(Application):
 
     def site_url(self, path=''):
         return urljoin(self.base_url, path)
+
+    def is_internal_link(self, path):
+        if path.startswith(self.base_url):
+            internal_path = path[len(self.base_url):].strip('/')
+        elif path.startswith('/' + self.base_path):
+            internal_path = path[len(self.base_path)+1:].strip('/')
+        elif not path.startswith('/'):
+            internal_path = path
+        else:
+            return False
+        
+        parts = internal_path.split('/')
+        if len(parts) == 0: return True # link to homepage
+        if parts[0] in {'files', 'images', 'site'}:
+            return False
+        else:
+            return True
 
     def render_template(self, template_name, **context):
         t = self.jinja_env.get_template(template_name)
@@ -79,9 +101,12 @@ class Ikwi(Application):
                             yield b'\n'
             
                 response = Response(js_gen(), mimetype='application/javascript')
-                response.set_etag(Ikwi.version)
-                response.make_conditional(request)
+                #response.set_etag(Ikwi.version)
+                #response.make_conditional(request)
                 return response
+            if path == ['search']:
+                results = self.search.search(request.args['q'])
+                return JSONResponse({'query': request.args['q'], 'results': results})
             else:
                 return self.not_found()
         else:
@@ -95,6 +120,8 @@ class Ikwi(Application):
                 elif request.query_verb == 'edit':
                     self.must_login(request)
                     return self.edit_page(url_page_name)
+                elif request.query_verb == 'inlinks':
+                    return self.show_inlinks(url_page_name)
                 elif request.query_verb in {None, 'no-redirect'}:
                     return self.show_page(url_page_name, self.latest)
                 else:
@@ -187,6 +214,12 @@ class Ikwi(Application):
         
         return JSONResponse({'status': 'ok', 'revision': status.revision})
 
+    def show_inlinks(self, url_page_name):
+        page_title = url_to_title(url_page_name)
+        filename = url_to_filename(url_page_name)
+        inlinks = self.links.inlinks(filename)
+        return self.render_template('inlinks.html', inlinks=inlinks, page_title=page_title, page_url=url_page_name)
+
     def serve_file(self, path, request):
         path = path[0]
         dir = self.latest.dir('files')
@@ -230,16 +263,20 @@ class Ikwi(Application):
             raise PermissionError
     
     def unauthorized(self):
+        response = self.render_template('unauthorized.html')
+        response.headers.extend({
+            'WWW-Authenticate': 'Basic realm="%s"' % self.config['site_title']
+        })
         return Response(
-            self.render_template('unauthorized.html'),
+            response.response,
             401,
-            {
-                'WWW-Authenticate': 'Basic realm="%s"' % self.config['site_title']
-            }
+            response.headers
         )
     
     def not_found(self, creatable=False):
+        response = self.render_template('not_found.html', creatable=creatable)
         return Response(
-            self.render_template('not_found.html', creatable=creatable),
-            404
+            response.response,
+            404,
+            response.headers
         )

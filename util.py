@@ -12,6 +12,8 @@ def url_to_title(url):
     return url.replace('_', ' ')
 def url_to_filename(url):
     return urlparse.quote(unicode.normalize('NFC', url))
+def filename_to_url(filename):
+    return urlparse.unquote(filename)
 def filename_to_title(filename):
     return urlparse.unquote(filename.replace('_', ' '))
 def title_to_filename(title):
