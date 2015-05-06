@@ -50,23 +50,18 @@ class LinksDatabase(Database):
             
             src = html5.fragment_fromstring(self.site.to_html(content), create_parent='div')
             links = src.xpath('//h:a[@href]', namespaces=ns)
-            page_links = []
+            page_links = set()
             
             for link in links:
                 dest = link.attrib['href']
                 destinfo = urlparse(dest)
-                if self.site.is_internal_link(dest):
-                    if dest.startswith('http:') or dest.startswith('https:'):
-                        dest_name = url_to_filename(destinfo.path.strip('/'))
-                    elif dest.startswith('/' + self.site.base_path):
-                        dest_name = url_to_filename(destinfo.path[len(self.site.base_path)+2:])
-                    else:
-                        dest_name = url_to_filename(destinfo.path.strip('/'))
-                    
-                    if dest_name == '': dest_name = 'Homepage'
-                    page_links.append((page, dest_name))
+                if dest.startswith('wiki:'):
+                    dest_name = url_to_filename(dest[5:])
+                    page_links.add((page, dest_name))
+                elif dest.rstrip('/') == self.site.base_url.rstrip('/'):
+                    page_links.add((page, 'Homepage'))
             
-            c.executemany('INSERT INTO links (source, target) VALUES (?, ?)', page_links)
+            c.executemany('INSERT INTO links (source, target) VALUES (?, ?)', list(page_links))
         
         try:
             for page, difference in differences.items():

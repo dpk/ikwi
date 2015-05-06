@@ -12,12 +12,12 @@ import pypandoc
 # Save PEP 3122!
 if "." in __name__:
     from .storage import Storage, Signature
-    from .util import url_to_title, url_to_filename, title_to_filename, sanitize_html, StorageTemplateLoader
+    from .util import url_to_title, url_to_filename, title_to_filename, sanitize_html, link_fix, StorageTemplateLoader
     from .www import Application, Request, Response, JSONResponse
     from .search import LinksDatabase, SearchDatabase
 else:
     from storage import Storage, Signature
-    from util import url_to_title, url_to_filename, title_to_filename, sanitize_html, StorageTemplateLoader
+    from util import url_to_title, url_to_filename, title_to_filename, sanitize_html, link_fix, StorageTemplateLoader
     from www import Application, Request, Response, JSONResponse
     from search import LinksDatabase, SearchDatabase
 
@@ -57,23 +57,6 @@ class Ikwi(Application):
 
     def site_url(self, path=''):
         return urljoin(self.base_url, path)
-
-    def is_internal_link(self, path):
-        if path.startswith(self.base_url):
-            internal_path = path[len(self.base_url):].strip('/')
-        elif path.startswith('/' + self.base_path):
-            internal_path = path[len(self.base_path)+1:].strip('/')
-        elif not path.startswith('/'):
-            internal_path = path
-        else:
-            return False
-        
-        parts = internal_path.split('/')
-        if len(parts) == 0: return True # link to homepage
-        if parts[0] in {'files', 'images', 'site'}:
-            return False
-        else:
-            return True
 
     def render_template(self, template_name, **context):
         t = self.jinja_env.get_template(template_name)
@@ -138,8 +121,12 @@ class Ikwi(Application):
                 self.must_login(request)
                 return self.save_page(url_page_name, request)
 
-    def to_html(self, source):
-        return pypandoc.convert(source, 'html', format=self.config['page_format'])
+    def to_html(self, source, fix_links=False):
+        html = pypandoc.convert(source, 'html', format=self.config['page_format'])
+        if fix_links:
+            return link_fix(html, fix=self.site_url)
+        else:
+            return html
     def to_source(self, html):
         return pypandoc.convert(html, self.config['page_format'], format='html')
 
@@ -170,7 +157,7 @@ class Ikwi(Application):
         if not page_source:
             return self.not_found(creatable=True)
         
-        page_content = self.to_html(page_source)
+        page_content = self.to_html(page_source, fix_links=True)
         header_image = self.header_image(url_to_filename(url_page_name), revision)
         
         response = self.render_template('page.html', page_title=page_title, page_content=page_content, header_image=header_image)

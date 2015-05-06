@@ -104,14 +104,18 @@ $(function() {
                 search = $('<input type=search id=linksearch />'),
                 results = $('<div class=results />');
             
-            var addResult = function(name, url) {
+            var addResult = function(name, url, isInternal) {
                 var resultLink = $('<a />'),
                     resultDiv = $('<div />');
                 resultLink.attr('href', url);
                 resultDiv.text(name);
                 resultLink.click(function(e) {
                     e.preventDefault();
-                    editor.makeLink(url);
+                    if (isInternal) {
+                        editor.makeLink('wiki:' + url);
+                    } else {
+                        editor.makeLink(url);
+                    }
                     $('.cover').detach();
                 });
                 
@@ -124,18 +128,22 @@ $(function() {
                     if (search.val() !== query) { return; }
                     
                     results.empty();
-                    if (query.match(urlRegexp)) { addResult(query, query); }
+                    if (query.match(urlRegexp)) { addResult(query, query, false); }
                     var isFirst = true;
                     _.each(data.results, function (result) {
-                        addResult(result.title, result.url);
+                        addResult(result.title, result.url, true);
                         if (isFirst && result.title.trim().toLowerCase() !== query.trim().toLowerCase()) {
                             var newPageTitle = query.trim().charAt(0).toUpperCase() + query.slice(1),
                                 newPageURL = newPageTitle.replace(' ', '_');
-                            addResult('New page: ' + newPageTitle, newPageURL);
-                        } else {
-                            isFirst = false;
+                            addResult('New page: ' + newPageTitle, newPageURL, true);
                         }
+                        isFirst = false;
                     });
+                    if (isFirst) {
+                        var newPageTitle = query.trim().charAt(0).toUpperCase() + query.slice(1),
+                            newPageURL = newPageTitle.replace(' ', '_');
+                        addResult('New page: ' + newPageTitle, newPageURL, true);
+                    }
                 }});
             };
             
@@ -147,7 +155,7 @@ $(function() {
             search.on('keyup', function(e) {
                 if (e.keyCode === 27) { $('.cover').detach(); return; }
                 var query = search.val();
-                if (query.match(urlRegexp)) { results.empty(); addResult(query, query); }
+                if (query.match(urlRegexp)) { results.empty(); addResult(query, query, false); }
                 doSearch(query);
             });
             dialog.append(search);

@@ -24,6 +24,17 @@ def sanitize_html(src):
     h = html5.fragment_fromstring(src, create_parent='div')
     brs = h.xpath('//h:br[count(following-sibling::node()) = 0]', namespaces={'h':'http://www.w3.org/1999/xhtml'})
     for br in brs: br.getparent().remove(br)
+    return serialize_fragment(h)
+
+def link_fix(src, fix):
+    h = html5.fragment_fromstring(src, create_parent='div')
+    links = h.xpath('//h:a[@href]', namespaces={'h':'http://www.w3.org/1999/xhtml'})
+    for link in links:
+        if link.attrib['href'].startswith('wiki:'):
+            link.attrib['href'] = fix(link.attrib['href'][5:])
+    return serialize_fragment(h)
+
+def serialize_fragment(h):
     # urgh
     walker = html5lib.getTreeWalker("etree")
     stream = walker(h)
