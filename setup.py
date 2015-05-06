@@ -4,7 +4,7 @@ from distutils.core import setup
 
 setup(
     name='ikwi',
-    version='0.2',
+    version='0.2.1',
     description='A personal wikiware.',
     author='David P. Kendal',
     author_email='pypi@dpk.io',

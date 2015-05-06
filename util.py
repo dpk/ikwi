@@ -31,7 +31,7 @@ def link_fix(src, fix):
     links = h.xpath('//h:a[@href]', namespaces={'h':'http://www.w3.org/1999/xhtml'})
     for link in links:
         if link.attrib['href'].startswith('wiki:'):
-            link.attrib['href'] = fix(link.attrib['href'][5:])
+            link.attrib['href'] = fix(urlparse.quote(link.attrib['href'][5:]))
     return serialize_fragment(h)
 
 def serialize_fragment(h):
