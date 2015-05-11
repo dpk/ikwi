@@ -6,6 +6,7 @@ storage -- tidemark git in a way that's useful for building web-apps
 # merge conflict resolution API probably needs a little tweaking
 
 from collections import deque
+from datetime import datetime, timezone, timedelta
 import os
 import os.path
 import time
@@ -35,6 +36,11 @@ class Storage:
     def latest(self):
         head_commit = self.repo[self.repo.head.resolve().target]
         return StorageRevision(self, head_commit.id, head_commit.tree)
+    
+    def history(self):
+        for commit in self.repo.walk(self.repo.head.resolve().target, pygit2.GIT_SORT_TIME):
+            date = datetime.fromtimestamp(commit.commit_time, timezone(timedelta(minutes=commit.commit_time_offset)))
+            yield date, StorageRevision(self, commit.id, commit.tree)
     
     def merge_conflict(self, source_revision, target_revision):
         merge = self.repo.merge_commits(target_revision, source_revision)
@@ -88,6 +94,20 @@ class StorageRevision:
         if tree_entry.filemode != pygit2.GIT_FILEMODE_TREE: return EmptyStorageRevision()
         tree = self.storage.repo[tree_entry.id]
         return StorageRevision(self.storage, self.revision, tree, self.root_tree)
+    
+    def diff_files(self, old_rev, include_contents=False):
+        diffs = {}
+        for entry in self.tree:
+            if entry.filemode != pygit2.GIT_FILEMODE_BLOB: continue
+            if entry.name not in old_rev:
+                diffs[entry.name] = ('created', None)
+            elif commit_id(entry.id) != old_rev.get_id(entry.name):
+                diffs[entry.name] = ('updated', None)
+        for entry in old_rev.tree:
+            if entry.name not in self:
+                diffs[entry.name] = ('deleted', None)
+        
+        return diffs
 
 # this needs a better API
 class EmptyStorageRevision:

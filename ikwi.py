@@ -1,3 +1,5 @@
+from datetime import date
+import itertools
 import mimetypes
 import os
 import os.path
@@ -12,12 +14,12 @@ import pypandoc
 # Save PEP 3122!
 if "." in __name__:
     from .storage import Storage, Signature
-    from .util import url_to_title, url_to_filename, title_to_filename, sanitize_html, link_fix, StorageTemplateLoader
+    from .util import url_to_title, url_to_filename, title_to_filename, filename_to_url, filename_to_title, sanitize_html, link_fix, StorageTemplateLoader
     from .www import Application, Request, Response, JSONResponse
     from .search import LinksDatabase, SearchDatabase
 else:
     from storage import Storage, Signature
-    from util import url_to_title, url_to_filename, title_to_filename, sanitize_html, link_fix, StorageTemplateLoader
+    from util import url_to_title, url_to_filename, title_to_filename, filename_to_url, filename_to_title, sanitize_html, link_fix, StorageTemplateLoader
     from www import Application, Request, Response, JSONResponse
     from search import LinksDatabase, SearchDatabase
 
@@ -95,9 +97,11 @@ class Ikwi(Application):
                 #response.set_etag(Ikwi.version)
                 #response.make_conditional(request)
                 return response
-            if path == ['search']:
+            elif path == ['search']:
                 results = self.search.search(request.args['q'])
                 return JSONResponse({'query': request.args['q'], 'results': results})
+            elif path == ['recent']:
+                return self.show_recent_changes(request)
             else:
                 return self.not_found()
         else:
@@ -215,6 +219,41 @@ class Ikwi(Application):
         inlinks = self.links.inlinks(filename)
         return self.render_template('inlinks.html', inlinks=inlinks, page_title=page_title, page_url=url_page_name)
 
+    def generate_recent_changes(self):
+        def date_group(revinfo):
+            time, revision = revinfo
+            return date(*time.timetuple()[:3])
+        
+        revision = None
+        revision_date = None
+        for prev_revision_date, prev_revision in itertools.islice(itertools.groupby(self.storage.history(), key=date_group), 31):
+            prev_revision = [r for dt, r in prev_revision]
+            if revision is None:
+                revision = prev_revision
+                revision_date = prev_revision_date
+                continue
+            
+            diffs = revision[0].dir('pages').diff_files(prev_revision[0].dir('pages'))
+            if len(diffs) != 0:
+                yield revision_date, diffs
+            
+            revision = prev_revision
+            revision_date = prev_revision_date
+
+    def show_recent_changes(self, request):
+        def format_recent_changes():
+            def link(file):
+                return {'url': file, 'title': filename_to_title(file)}
+            
+            for date, changes in self.generate_recent_changes():
+                yield {
+                    'date': date,
+                    'updated': sorted((link(file) for file, op in changes.items() if op[0] == 'updated'), key=lambda x: x['title']),
+                    'created': sorted((link(file) for file, op in changes.items() if op[0] == 'created'), key=lambda x: x['title'])
+                }
+        
+        return self.render_template('recent.html', changes=format_recent_changes())
+
     def serve_file(self, path, request):
         path = path[0]
         dir = self.latest.dir('files')
@@ -229,7 +268,7 @@ class Ikwi(Application):
         response.set_etag(dir.get_id(path))
         response.make_conditional(request)
         return response
-
+    
     def serve_image(self, path, revision, request):
         path = url_to_filename(path)
         dir = self.latest.dir('images')
