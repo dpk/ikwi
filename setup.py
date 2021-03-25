@@ -20,7 +20,7 @@ setup(
         'lxml>=3.4.3',
         'pygit2==0.22.0',
         'pypandoc==0.9.7',
-        'PyYAML==3.11',
+        'PyYAML==5.4',
         'Werkzeug>=0.10.4',
         'whoosh>=2.7.0'
     ]
